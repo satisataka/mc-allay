@@ -22,7 +22,9 @@ class _RedactFilter(logging.Filter):
 
 def setup_logging(secret):
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    )
     handler.addFilter(_RedactFilter(secret))
     log.addHandler(handler)
     log.setLevel(logging.INFO)
@@ -38,36 +40,42 @@ def load_json(path, default):
 # name -> (fallback emoji, custom_emoji_id or None)
 EMOJI = {
     # new player announcement
-    "welcome":    ("💌", "5307974696136889336"),
-    "whitelist":  ("✅", "5307564088673455989"),
-    "lock":       ("🔒", "5307989333385433249"),
-    "pickaxe":    ("⛏️", "5278459663698912652"),
+    "welcome": ("💌", "5307974696136889336"),
+    "whitelist": ("✅", "5307564088673455989"),
+    "lock": ("🔒", "5307989333385433249"),
+    "pickaxe": ("⛏️", "5278459663698912652"),
     # join
-    "join":       ("🌀", "5048801977060819786"),
-    "online":     ("👤", "5462957495796382139"),
+    "join": ("🌀", "5048801977060819786"),
+    "online": ("👤", "5462957495796382139"),
     "first_join": ("🔔", "5202191064680642242"),
     # commands (plain emoji for now)
-    "world":      ("🌍", "4981253974129640750"),
-    "offline":    ("🔴", "4981503065052939394"),
-    "speed":      ("⚡", None),
-    "uptime":     ("⏱", None),
-    "disk":       ("💾", None),
-    "backup":     ("🗄", None),
-    "p_online":   ("🟢", "5307588930764297000"),
-    "p_seen":     ("⚪", "5032980112111305692"),
-    "p_never":    ("⚫", "4902235874487436351"),
-    "leave":      ("🚪", "5071095554566521757"),
-    "death":      ("💀", None),
-    # advancements
-    "adv":           ("🏅", None),
-    "adv_challenge": ("🏆", None),
-    "adv_first":     ("🥇", None),
+    "world": ("🌍", "4981253974129640750"),
+    "offline": ("🔴", "4981503065052939394"),
+    "speed": ("⚡", None),
+    "uptime": ("⏱", None),
+    "disk": ("💾", None),
+    "backup": ("🗄", None),
+    "p_online": ("🟢", "5307588930764297000"),
+    "p_seen": ("⚪", "5032980112111305692"),
+    "p_never": ("⚫", "4902235874487436351"),
+    "leave": ("🚪", "5071095554566521757"),
+    "death": ("💀", None),
+    # advancements (per-advancement icons live in advancements.py)
+    "adv_many": ("🏅", "5256239066277500042"),
+    "adv_first": ("🥇", "5801004944211317728"),
 }
 
 
+def emoji(fallback, custom_id=None):
+    return (
+        f'<tg-emoji emoji-id="{custom_id}">{fallback}</tg-emoji>'
+        if custom_id
+        else fallback
+    )
+
+
 def e(name):
-    fallback, custom_id = EMOJI[name]
-    return f'<tg-emoji emoji-id="{custom_id}">{fallback}</tg-emoji>' if custom_id else fallback
+    return emoji(*EMOJI[name])
 
 
 def fmt_size(n):

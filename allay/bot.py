@@ -5,7 +5,7 @@ import json
 import re
 import time
 
-from .util import e, fmt_duration, fmt_seen, fmt_size, load_json, log
+from .util import e, emoji, fmt_duration, fmt_seen, fmt_size, load_json, log
 from .workers import Batcher
 
 NICK_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
@@ -188,22 +188,20 @@ class Allay:
     def announce_advancements(self, nick, items):
         name = self.player_html(nick)
         loud = any(first for _, first in items)
-        icon = e("adv_first") if loud else e("adv_challenge") if any(
-            adv.frame == "challenge" for adv, _ in items) else e("adv")
+
+        def title(adv, first):
+            text = f"«{html.escape(adv.title)}»"
+            return text + f" · {e('adv_first')} первым на сервере!" if first else text
 
         if len(items) == 1:
             adv, first = items[0]
-            text = f"{icon} {name} {ADVANCEMENT_VERBS[adv.frame]} «{html.escape(adv.title)}»"
-            if first:
-                text += " — первым на сервере!"
+            text = f"{emoji(*adv.icon)} {name} {ADVANCEMENT_VERBS[adv.frame]} {title(adv, first)}"
             if adv.description:
                 text += f"\n<i>{html.escape(adv.description)}</i>"
         else:
-            titles = ", ".join(
-                f"«{html.escape(adv.title)}»" + (" (первым на сервере!)" if first else "")
-                for adv, first in items
-            )
-            text = f"{icon} {name} получил достижения: {titles}"
+            lines = [f"{e('adv_many')} {name} получил достижения:"]
+            lines += [f"{emoji(*adv.icon)} {title(adv, first)}" for adv, first in items]
+            text = "\n".join(lines)
         # only "first on the server" is worth a notification
         self.send(text, silent=not loud)
 
