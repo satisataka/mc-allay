@@ -222,3 +222,6 @@ __marimo__/
 # Allay runtime state (players.json with telegram usernames)
 state/
 players.json
+
+# macOS
+.DS_Store
