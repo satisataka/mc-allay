@@ -63,6 +63,23 @@ EMOJI = {
     # advancements (per-advancement icons live in advancements.py)
     "adv_many": ("🏅", "5256239066277500042"),
     "adv_first": ("🥇", "5801004944211317728"),
+    # /top, /stats, /world
+    "top": ("🏆", None),
+    "top1": ("🥇", "5801004944211317728"),
+    "top2": ("🥈", None),
+    "top3": ("🥉", None),
+    "stats": ("📊", None),
+    "distance": ("🗺", None),
+    "mined": ("⛏️", None),
+    "diamond": ("💎", None),
+    "kills": ("⚔️", None),
+    "advancements": ("🏅", None),
+    "favorite": ("❤️", None),
+    "day": ("☀️", None),
+    "night": ("🌙", None),
+    "dusk": ("🌅", None),
+    "difficulty": ("🎚", None),
+    "version": ("🧩", None),
 }
 
 
@@ -85,6 +102,16 @@ def fmt_size(n):
         n /= 1024
         i += 1
     return f"{n:.1f} {units[i]}" if i >= 2 else f"{n:.0f} {units[i]}"
+
+
+def fmt_int(n):
+    """12345 -> '12 345'"""
+    return f"{int(n):,}".replace(",", " ")
+
+
+def fmt_distance(cm):
+    m = cm / 100
+    return f"{m / 1000:.1f} км" if m >= 1000 else f"{m:.0f} м"
 
 
 def fmt_duration(seconds):

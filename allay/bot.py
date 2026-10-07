@@ -5,7 +5,9 @@ import json
 import re
 import time
 
-from .util import e, emoji, fmt_duration, fmt_seen, fmt_size, load_json, log
+from .lang import mc_name
+from .stats import TOP, PlayerStats
+from .util import e, emoji, fmt_distance, fmt_duration, fmt_int, fmt_seen, fmt_size, load_json, log
 from .workers import Batcher
 
 NICK_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
@@ -20,22 +22,41 @@ ADVANCEMENT_VERBS = {
     "challenge": "завершил испытание",
 }
 
+DIFFICULTY = {"Peaceful": "мирная", "Easy": "лёгкая", "Normal": "нормальная", "Hard": "сложная"}
+
+
+def world_clock(daytime):
+    """Ticks since 6:00 -> ('14:30', emoji name, phase)."""
+    daytime %= 24000
+    clock = f"{(daytime // 1000 + 6) % 24:02d}:{daytime % 1000 * 60 // 1000:02d}"
+    if daytime < 12000:
+        return clock, "day", "день"
+    if daytime < 13000:
+        return clock, "dusk", "закат"
+    if daytime < 23000:
+        return clock, "night", "ночь"
+    return clock, "dusk", "рассвет"
+
 
 class Allay:
-    def __init__(self, cfg, tg, server, deaths, advancements):
+    def __init__(self, cfg, tg, server, deaths, advancements, ru):
         self.cfg = cfg
         self.tg = tg
         self.server = server
         self.deaths = deaths
         self.advancements = advancements
+        self.ru = ru  # russian lang file, for block/mob names in /stats
         self.adv_batch = Batcher(ADVANCEMENT_BATCH_SECONDS, self.announce_advancements)
         self.adv_seen = set()  # advancement ids announced since start (files may lag behind)
         self.sessions = {}  # lowercased nick -> join timestamp
         self.username = ""
-        # name -> (description, handler(args), admin_only)
+        # name -> (description, handler(args, msg), admin_only)
         self.commands = {
             "status": ("Состояние сервера", self.cmd_status, False),
             "players": ("Игроки и последний вход", self.cmd_players, False),
+            "world": ("Информация о мире", self.cmd_world, False),
+            "top": ("Рейтинги игроков", self.cmd_top, False),
+            "stats": ("Статистика игрока: [ник]", self.cmd_stats, False),
             "wl_add": ("Добавить игрока: ник [@telegram]", self.cmd_wl_add, True),
             "wl_remove": ("Удалить игрока из whitelist", self.cmd_wl_remove, True),
         }
@@ -76,6 +97,33 @@ class Allay:
 
     def send(self, text, silent=False):
         return self.tg.send(self.cfg.chat_id, text, silent=silent)
+
+    def visible_players(self):
+        """[(nick, uuid)] from the whitelist, hidden players excluded."""
+        return [(x["name"], x.get("uuid", "")) for x in self.server.whitelist()
+                if x.get("name") and not self.is_hidden(x["name"])]
+
+    def played_stats(self):
+        """[(nick, uuid, PlayerStats)] for visible players who have played at least once."""
+        result = []
+        for nick, uuid in self.visible_players():
+            raw = self.server.player_stats(uuid)
+            if raw is not None:
+                result.append((nick, uuid, PlayerStats(raw)))
+        return result
+
+    def find_nick(self, query):
+        """Whitelisted nick, case-insensitive; None if absent or hidden."""
+        for nick, _ in self.visible_players():
+            if nick.lower() == query.lower():
+                return nick
+        return None
+
+    def nick_by_telegram(self, username):
+        for nick, info in self.load_players().items():
+            if str(info.get("telegram", "")).lower() == username.lower():
+                return self.find_nick(nick)
+        return None
 
     # --- events ---
 
@@ -228,7 +276,7 @@ class Allay:
 
     # --- commands ---
 
-    def cmd_status(self, args):
+    def cmd_status(self, args, msg):
         server_name = html.escape(self.cfg.server_name)
         online = self.online()
         if online is None:
@@ -260,7 +308,7 @@ class Allay:
         lines.append(f"{e('backup')} Бэкап: " + (f"{fmt_duration(age)} назад" if age is not None else "нет"))
         return "\n".join(lines)
 
-    def cmd_players(self, args):
+    def cmd_players(self, args, msg):
         online = self.online()
         online_names = {n.lower() for n in online[2]} if online else set()
 
@@ -287,7 +335,131 @@ class Allay:
             lines += ["", "<i>Сервер недоступен, онлайн неизвестен</i>"]
         return "\n".join(lines)
 
-    def cmd_wl_add(self, args):
+    def cmd_world(self, args, msg):
+        lines = [f"{e('world')} <b>{html.escape(self.cfg.server_name)}</b>", ""]
+
+        day, daytime = self.server.time_query("day"), self.server.time_query("daytime")
+        if day is not None and daytime is not None:
+            clock, icon, phase = world_clock(daytime)
+            lines.append(f"{e(icon)} День {fmt_int(day + 1)} · {clock}, {phase}")
+        difficulty = self.server.difficulty()
+        if difficulty:
+            lines.append(f"{e('difficulty')} Сложность: {DIFFICULTY.get(difficulty, difficulty)}")
+        version = self.server.version()
+        if version:
+            lines.append(f"{e('version')} Версия: {html.escape(version)}")
+        if day is None:
+            lines.append("<i>Сервер недоступен, время и сложность неизвестны</i>")
+
+        players = self.played_stats()
+        lines += ["", f"{e('online')} Игроков: {len(self.visible_players())} · заходили: {len(players)}"]
+        if players:
+            def total(value):
+                return sum(value(s) for _, _, s in players)
+
+            advancements = sum(self.server.advancement_count(uuid) for _, uuid, _ in players)
+            most_active = max(players, key=lambda p: p[2].play_seconds)
+            lines += [
+                f"{e('uptime')} Наиграно всего: {fmt_duration(total(lambda s: s.play_seconds))}",
+                f"{e('distance')} Пройдено вместе: {fmt_distance(total(lambda s: s.distance_cm))}",
+                f"{e('mined')} Добыто блоков: {fmt_int(total(lambda s: s.blocks_mined))}"
+                f" · {e('diamond')} алмазов: {fmt_int(total(lambda s: s.diamonds))}",
+                f"{e('kills')} Убито мобов: {fmt_int(total(lambda s: s.mob_kills))}",
+                f"{e('death')} Смертей: {fmt_int(total(lambda s: s.deaths))}",
+                f"{e('advancements')} Достижений получено: {fmt_int(advancements)}",
+                "",
+                f"{e('top1')} Самый активный: {self.player_html(most_active[0])}"
+                f" · {fmt_duration(most_active[2].play_seconds)}",
+            ]
+        return "\n".join(lines)
+
+    def cmd_top(self, args, msg):
+        usage = "Категории: " + " · ".join(f"<code>/top {k}</code>" for k in TOP)
+        if len(args) > 1 or (args and args[0].lower() not in TOP):
+            return usage
+        players = self.played_stats()
+        if not players:
+            return "Пока никто не играл"
+
+        def place(i):
+            return e(f"top{i + 1}") if i < 3 else f"{i + 1}."
+
+        if args:  # one category, everyone
+            icon, title, value, fmt = TOP[args[0].lower()]
+            rows = sorted(players, key=lambda p: value(p[2]), reverse=True)
+            lines = [f"{e(icon)} <b>{title}</b>", ""]
+            lines += [f"{place(i)} {self.player_html(nick)} · {fmt(value(s))}"
+                      for i, (nick, _, s) in enumerate(rows)]
+            return "\n".join(lines)
+
+        # overview: top 3 per category
+        lines = [f"{e('top')} <b>Топ игроков</b>"]
+        for icon, title, value, fmt in TOP.values():
+            rows = sorted(((nick, value(s)) for nick, _, s in players if value(s) > 0),
+                          key=lambda r: r[1], reverse=True)[:3]
+            if rows:
+                lines += ["", f"{e(icon)} <b>{title}</b>"]
+                lines.append(" · ".join(f"{place(i)} {self.player_html(nick)} {fmt(v)}"
+                                        for i, (nick, v) in enumerate(rows)))
+        lines += ["", f"<i>Весь рейтинг: {usage.removeprefix('Категории: ')}</i>"]
+        return "\n".join(lines)
+
+    def cmd_stats(self, args, msg):
+        if len(args) > 1:
+            return "Использование: <code>/stats [ник]</code>"
+        if args:
+            nick = self.find_nick(args[0])
+            if nick is None:
+                return f"Игрока <b>{html.escape(args[0])}</b> нет в whitelist"
+        else:
+            username = msg.get("from", {}).get("username")
+            nick = self.nick_by_telegram(username) if username else None
+            if nick is None:
+                return "Не знаю твой ник в игре 🤔 Укажи его: <code>/stats ник</code>"
+
+        name = self.player_html(nick)
+        uuid = self.server.uuid_of(nick)
+        raw = self.server.player_stats(uuid)
+        if raw is None:
+            return f"{e('p_never')} {name} ещё не заходил на сервер"
+        s = PlayerStats(raw)
+
+        online = self.online()
+        if online and nick.lower() in {n.lower() for n in online[2]}:
+            presence = f"{e('p_online')} сейчас в игре"
+        else:
+            seen = self.server.last_seen(uuid)
+            presence = f"был {fmt_seen(seen, self.cfg.tz)}" if seen else ""
+
+        lines = [
+            f"{e('stats')} <b>Статистика</b> {name}",
+            "",
+            f"{e('uptime')} В игре: {fmt_duration(s.play_seconds)}" + (f" · {presence}" if presence else ""),
+            f"{e('distance')} Пройдено: {fmt_distance(s.distance_cm)}",
+            f"{e('mined')} Добыто блоков: {fmt_int(s.blocks_mined)} · {e('diamond')} алмазов: {fmt_int(s.diamonds)}",
+            f"{e('kills')} Убито мобов: {fmt_int(s.mob_kills)}"
+            + (f" · игроков: {fmt_int(s.player_kills)}" if s.player_kills else ""),
+            f"{e('death')} Смертей: {fmt_int(s.deaths)}"
+            + (f" · без смертей уже {fmt_duration(s.since_death_seconds)}"
+               if s.deaths and s.since_death_seconds >= 60 else ""),
+            f"{e('advancements')} Достижений: {fmt_int(self.server.advancement_count(uuid))}",
+        ]
+
+        favorites = [
+            ("favorite", "Любимый блок", "mined"),
+            ("kills", "Главная жертва", "killed"),
+            ("death", "Главный враг", "killed_by"),
+        ]
+        extra = []
+        for icon, title, category in favorites:
+            fav = s.favorite(category)
+            if fav:
+                extra.append(f"{e(icon)} {title}: {html.escape(mc_name(self.ru, fav[0]))} · {fmt_int(fav[1])}")
+        if extra:
+            lines += ["", *extra]
+        return "\n".join(lines)
+
+    def cmd_wl_add(self, args, msg):
         if not args or len(args) > 2 or not NICK_RE.match(args[0]):
             return "Использование: <code>/wl_add ник [@telegram]</code>"
         nick = args[0]
@@ -314,7 +486,7 @@ class Allay:
             lines.append("<i>Сервер недоступен, whitelist применится при запуске</i>")
         return "\n".join(lines)
 
-    def cmd_wl_remove(self, args):
+    def cmd_wl_remove(self, args, msg):
         if len(args) != 1 or not NICK_RE.match(args[0]):
             return "Использование: <code>/wl_remove ник</code>"
         nick = args[0]
@@ -358,7 +530,7 @@ class Allay:
             reply = "Эта команда доступна только админу"
         else:
             try:
-                reply = handler(args)
+                reply = handler(args, msg)
             except Exception as ex:
                 log.info(f"/{cmd} failed: {ex!r}")
                 reply = "Не получилось выполнить команду 😕"

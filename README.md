@@ -27,6 +27,9 @@ docker compose logs -f
 | Команда | Кто |
 |---|---|
 | `/status`, `/players` | все в чате сервера |
+| `/world` — день, время, сложность, общая статистика мира | все |
+| `/top [time\|distance\|blocks\|diamonds\|mobs\|deaths]` — рейтинги | все |
+| `/stats [ник]` — карточка игрока; без ника — по telegram из `players.json` | все |
 | `/wl_add ник [@telegram]` | только админ (`TG_ADMIN_ID`), в чате сервера или в личке с ботом |
 | `/wl_remove ник` | только админ |
 

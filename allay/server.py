@@ -30,6 +30,7 @@ class Server:
         self._player_data = data_dir / "world/players/data"
         # new world layout keeps them under players/, older versions in world/advancements
         self._advancement_dirs = [data_dir / "world/players/advancements", data_dir / "world/advancements"]
+        self._stats_dirs = [data_dir / "world/players/stats", data_dir / "world/stats"]
         self.started_at = None  # set when "Done (...)" is seen in the log
         self._world_cache = {"at": 0.0, "size": 0}
 
@@ -51,6 +52,16 @@ class Server:
         if not avg:
             return None
         return float(avg.group(1)), float(p95.group(1)) if p95 else None
+
+    def time_query(self, what):
+        """`time query day|daytime|gametime` as int, or None."""
+        m = re.search(r"The time is (\d+)", self.rcon.command(f"time query {what}") or "")
+        return int(m.group(1)) if m else None
+
+    def difficulty(self):
+        """'Normal', 'Hard', ... or None."""
+        m = re.search(r"The difficulty is (\w+)", self.rcon.command("difficulty") or "")
+        return m.group(1) if m else None
 
     # --- whitelist ---
 
@@ -103,6 +114,37 @@ class Server:
                 if isinstance(entry, dict) and entry.get("done"):
                     done.add(path.stem)
         return done
+
+    def _player_file(self, dirs, uuid):
+        for d in dirs:
+            path = d / f"{uuid}.json"
+            if path.exists():
+                return path
+        return None
+
+    def player_stats(self, uuid):
+        """Raw stats json, or None if the player has never played."""
+        path = self._player_file(self._stats_dirs, uuid)
+        return load_json(path, None) if path else None
+
+    def advancement_count(self, uuid):
+        """Completed advancements, recipes excluded."""
+        path = self._player_file(self._advancement_dirs, uuid)
+        data = load_json(path, {}) if path else {}
+        return sum(1 for k, v in data.items()
+                   if isinstance(v, dict) and v.get("done") and not k.startswith("minecraft:recipes/"))
+
+    def version(self):
+        """Minecraft version from the current log, or None."""
+        try:
+            with open(self.log_file, encoding="utf-8", errors="replace") as f:
+                for _, line in zip(range(500), f):  # it's near the top
+                    m = re.search(r"Starting minecraft server version (\S+)", line)
+                    if m:
+                        return m.group(1)
+        except OSError:
+            pass
+        return None
 
     def last_seen(self, uuid):
         try:
