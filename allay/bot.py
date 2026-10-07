@@ -7,7 +7,8 @@ import time
 
 from .lang import mc_name
 from .stats import TOP, PlayerStats
-from .util import e, emoji, fmt_distance, fmt_duration, fmt_int, fmt_seen, fmt_size, load_json, log
+from .telegram import button, keyboard
+from .util import EMOJI, e, emoji, fmt_distance, fmt_duration, fmt_int, fmt_seen, fmt_size, load_json, log
 from .workers import Batcher
 
 NICK_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
@@ -352,7 +353,7 @@ class Allay:
             lines.append("<i>Сервер недоступен, время и сложность неизвестны</i>")
 
         players = self.played_stats()
-        lines += ["", f"{e('online')} Игроков: {len(self.visible_players())} · заходили: {len(players)}"]
+        lines += ["", f"{e('online')} Игроков: {len(self.visible_players())}"]
         if players:
             def total(value):
                 return sum(value(s) for _, _, s in players)
@@ -362,8 +363,8 @@ class Allay:
             lines += [
                 f"{e('uptime')} Наиграно всего: {fmt_duration(total(lambda s: s.play_seconds))}",
                 f"{e('distance')} Пройдено вместе: {fmt_distance(total(lambda s: s.distance_cm))}",
-                f"{e('mined')} Добыто блоков: {fmt_int(total(lambda s: s.blocks_mined))}"
-                f" · {e('diamond')} алмазов: {fmt_int(total(lambda s: s.diamonds))}",
+                f"{e('mined')} Добыто блоков: {fmt_int(total(lambda s: s.blocks_mined))}",
+                f"{e('diamond')} Добыто алмазов: {fmt_int(total(lambda s: s.diamonds))}",
                 f"{e('kills')} Убито мобов: {fmt_int(total(lambda s: s.mob_kills))}",
                 f"{e('death')} Смертей: {fmt_int(total(lambda s: s.deaths))}",
                 f"{e('advancements')} Достижений получено: {fmt_int(advancements)}",
@@ -374,35 +375,9 @@ class Allay:
         return "\n".join(lines)
 
     def cmd_top(self, args, msg):
-        usage = "Категории: " + " · ".join(f"<code>/top {k}</code>" for k in TOP)
         if len(args) > 1 or (args and args[0].lower() not in TOP):
-            return usage
-        players = self.played_stats()
-        if not players:
-            return "Пока никто не играл"
-
-        def place(i):
-            return e(f"top{i + 1}") if i < 3 else f"{i + 1}."
-
-        if args:  # one category, everyone
-            icon, title, value, fmt = TOP[args[0].lower()]
-            rows = sorted(players, key=lambda p: value(p[2]), reverse=True)
-            lines = [f"{e(icon)} <b>{title}</b>", ""]
-            lines += [f"{place(i)} {self.player_html(nick)} · {fmt(value(s))}"
-                      for i, (nick, _, s) in enumerate(rows)]
-            return "\n".join(lines)
-
-        # overview: top 3 per category
-        lines = [f"{e('top')} <b>Топ игроков</b>"]
-        for icon, title, value, fmt in TOP.values():
-            rows = sorted(((nick, value(s)) for nick, _, s in players if value(s) > 0),
-                          key=lambda r: r[1], reverse=True)[:3]
-            if rows:
-                lines += ["", f"{e(icon)} <b>{title}</b>"]
-                lines.append(" · ".join(f"{place(i)} {self.player_html(nick)} {fmt(v)}"
-                                        for i, (nick, v) in enumerate(rows)))
-        lines += ["", f"<i>Весь рейтинг: {usage.removeprefix('Категории: ')}</i>"]
-        return "\n".join(lines)
+            return "Категории: " + " · ".join(f"<code>/top {k}</code>" for k in TOP)
+        return self.top_view(args[0].lower() if args else None)
 
     def cmd_stats(self, args, msg):
         if len(args) > 1:
@@ -411,17 +386,56 @@ class Allay:
             nick = self.find_nick(args[0])
             if nick is None:
                 return f"Игрока <b>{html.escape(args[0])}</b> нет в whitelist"
-        else:
-            username = msg.get("from", {}).get("username")
-            nick = self.nick_by_telegram(username) if username else None
-            if nick is None:
-                return "Не знаю твой ник в игре 🤔 Укажи его: <code>/stats ник</code>"
+            return self.stats_view(nick)
+        username = msg.get("from", {}).get("username")
+        nick = self.nick_by_telegram(username) if username else None
+        if nick is None:
+            return f"{e('stats')} Чью статистику показать?", self.players_keyboard()
+        return self.stats_view(nick)
 
+    # --- views: shared by commands and inline buttons, return (text, keyboard) ---
+
+    def top_view(self, key=None):
+        """Overview with top 3 per category, or the full ranking for one category."""
+        players = self.played_stats()
+        if not players:
+            return "Пока никто не играл", None
+
+        def place(i):
+            return e(f"top{i + 1}") if i < 3 else f"{i + 1}."
+
+        def ranking(value, fmt, limit=None):
+            rows = sorted(((nick, value(s)) for nick, _, s in players), key=lambda r: r[1], reverse=True)
+            if limit:  # overview: only players who have something in this category
+                rows = [r for r in rows if r[1] > 0][:limit]
+            return [f"{place(i)} {self.player_html(nick)} · {fmt(v)}" for i, (nick, v) in enumerate(rows)]
+
+        if key in TOP:
+            icon, title, _, value, fmt = TOP[key]
+            lines = [f"{e(icon)} <b>{title}</b>", "", *ranking(value, fmt)]
+        else:
+            lines = [f"{e('top')} <b>Топ игроков</b>"]
+            for icon, title, _, value, fmt in TOP.values():
+                rows = ranking(value, fmt, limit=3)
+                if rows:
+                    lines += ["", f"{e(icon)} <b>{title}</b>", *rows]
+
+        buttons = [button(f"{EMOJI[icon][0]} {label}", f"top:{k}")
+                   for k, (icon, _, label, _, _) in TOP.items() if k != key]
+        if key in TOP:
+            buttons.append(button("« Все категории", "top:"))
+        return "\n".join(lines), keyboard(buttons)
+
+    def stats_view(self, nick):
+        nick = self.find_nick(nick or "")
+        if nick is None:
+            return "Такого игрока нет в whitelist", None
+        others = self.players_keyboard(exclude=nick)
         name = self.player_html(nick)
         uuid = self.server.uuid_of(nick)
         raw = self.server.player_stats(uuid)
         if raw is None:
-            return f"{e('p_never')} {name} ещё не заходил на сервер"
+            return f"{e('p_never')} {name} ещё не заходил на сервер", others
         s = PlayerStats(raw)
 
         online = self.online()
@@ -436,7 +450,8 @@ class Allay:
             "",
             f"{e('uptime')} В игре: {fmt_duration(s.play_seconds)}" + (f" · {presence}" if presence else ""),
             f"{e('distance')} Пройдено: {fmt_distance(s.distance_cm)}",
-            f"{e('mined')} Добыто блоков: {fmt_int(s.blocks_mined)} · {e('diamond')} алмазов: {fmt_int(s.diamonds)}",
+            f"{e('mined')} Добыто блоков: {fmt_int(s.blocks_mined)}",
+            f"{e('diamond')} Добыто алмазов: {fmt_int(s.diamonds)}",
             f"{e('kills')} Убито мобов: {fmt_int(s.mob_kills)}"
             + (f" · игроков: {fmt_int(s.player_kills)}" if s.player_kills else ""),
             f"{e('death')} Смертей: {fmt_int(s.deaths)}"
@@ -457,7 +472,12 @@ class Allay:
                 extra.append(f"{e(icon)} {title}: {html.escape(mc_name(self.ru, fav[0]))} · {fmt_int(fav[1])}")
         if extra:
             lines += ["", *extra]
-        return "\n".join(lines)
+        return "\n".join(lines), others
+
+    def players_keyboard(self, exclude=None):
+        """A button per player who has played, to open their /stats."""
+        nicks = [nick for nick, _, _ in self.played_stats() if nick != exclude]
+        return keyboard([button(nick, f"stats:{nick}") for nick in nicks])
 
     def cmd_wl_add(self, args, msg):
         if not args or len(args) > 2 or not NICK_RE.match(args[0]):
@@ -534,7 +554,31 @@ class Allay:
             except Exception as ex:
                 log.info(f"/{cmd} failed: {ex!r}")
                 reply = "Не получилось выполнить команду 😕"
-        self.tg.send(msg["chat"]["id"], reply, reply_to=msg["message_id"])
+        # handlers return text, or (text, inline keyboard)
+        text, markup = reply if isinstance(reply, tuple) else (reply, None)
+        self.tg.send(msg["chat"]["id"], text, reply_to=msg["message_id"], keyboard=markup)
+
+    def handle_callback(self, query):
+        """Inline button press: re-renders the message it belongs to."""
+        self.tg.call("answerCallbackQuery", callback_query_id=query["id"])  # stops the button spinner
+        msg = query.get("message")
+        if not msg:
+            return
+        chat = msg["chat"]
+        if chat["id"] != self.cfg.chat_id and not (chat["type"] == "private"
+                                                   and self.is_admin(query["from"]["id"])):
+            return
+
+        kind, _, arg = query.get("data", "").partition(":")
+        view = {"top": self.top_view, "stats": self.stats_view}.get(kind)
+        if view is None:
+            return
+        try:
+            text, markup = view(arg or None)
+        except Exception as ex:
+            log.info(f"button {query.get('data')} failed: {ex!r}")
+            return
+        self.tg.edit(chat["id"], msg["message_id"], text, keyboard=markup)
 
     def _set_commands(self):
         def menu(admin):
@@ -565,7 +609,7 @@ class Allay:
         log.info(f"bot @{self.username} ready")
 
         while True:
-            params = {"timeout": 50, "allowed_updates": ["message"]}
+            params = {"timeout": 50, "allowed_updates": ["message", "callback_query"]}
             if offset is not None:
                 params["offset"] = offset
             updates = self.tg.call("getUpdates", http_timeout=60, **params)
@@ -576,3 +620,5 @@ class Allay:
                 offset = u["update_id"] + 1
                 if "message" in u:
                     self.handle_message(u["message"])
+                elif "callback_query" in u:
+                    self.handle_callback(u["callback_query"])

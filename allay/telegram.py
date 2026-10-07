@@ -24,7 +24,7 @@ class Telegram:
             return None
         return data["result"]
 
-    def send(self, chat_id, text, silent=False, reply_to=None):
+    def send(self, chat_id, text, silent=False, reply_to=None, keyboard=None):
         params = {
             "chat_id": chat_id,
             "text": text,
@@ -34,4 +34,29 @@ class Telegram:
         }
         if reply_to:
             params["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
+        if keyboard:
+            params["reply_markup"] = keyboard
         return self.call("sendMessage", **params)
+
+    def edit(self, chat_id, message_id, text, keyboard=None):
+        params = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "link_preview_options": {"is_disabled": True},
+        }
+        if keyboard:
+            params["reply_markup"] = keyboard
+        return self.call("editMessageText", **params)
+
+
+def button(text, data):
+    """Inline button; data comes back in callback_query (max 64 bytes)."""
+    return {"text": text, "callback_data": data}
+
+
+def keyboard(buttons, per_row=3):
+    if not buttons:
+        return None
+    return {"inline_keyboard": [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]}

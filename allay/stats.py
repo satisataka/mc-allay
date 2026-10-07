@@ -63,12 +63,12 @@ class PlayerStats:
         return max(values.items(), key=lambda kv: kv[1])
 
 
-# /top <key>: (emoji name, title, value(stats), format(value))
+# /top <key>: (emoji name, title, button label, value(stats), format(value))
 TOP = {
-    "time":     ("uptime",   "Время в игре",    lambda s: s.play_seconds, fmt_duration),
-    "distance": ("distance", "Пройдено",        lambda s: s.distance_cm,  fmt_distance),
-    "blocks":   ("mined",    "Добыто блоков",   lambda s: s.blocks_mined, fmt_int),
-    "diamonds": ("diamond",  "Добыто алмазов",  lambda s: s.diamonds,     fmt_int),
-    "mobs":     ("kills",    "Убито мобов",     lambda s: s.mob_kills,    fmt_int),
-    "deaths":   ("death",    "Смерти",          lambda s: s.deaths,       fmt_int),
+    "time":     ("uptime",   "Время в игре",   "Время",  lambda s: s.play_seconds, fmt_duration),
+    "distance": ("distance", "Пройдено",       "Путь",   lambda s: s.distance_cm,  fmt_distance),
+    "blocks":   ("mined",    "Добыто блоков",  "Блоки",  lambda s: s.blocks_mined, fmt_int),
+    "diamonds": ("diamond",  "Добыто алмазов", "Алмазы", lambda s: s.diamonds,     fmt_int),
+    "mobs":     ("kills",    "Убито мобов",    "Мобы",   lambda s: s.mob_kills,    fmt_int),
+    "deaths":   ("death",    "Смерти",         "Смерти", lambda s: s.deaths,       fmt_int),
 }
