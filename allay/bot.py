@@ -58,7 +58,7 @@ class Allay:
             "world": ("Информация о мире", self.cmd_world, False),
             "top": ("Рейтинги игроков", self.cmd_top, False),
             "stats": ("Статистика игрока: [ник]", self.cmd_stats, False),
-            "week": ("Итоги недели на сейчас", self.cmd_week, False),
+            "week": ("Промежуточные итоги недели", self.cmd_week, False),
             "wl_add": ("Добавить игрока: ник [@telegram]", self.cmd_wl_add, True),
             "wl_remove": ("Удалить игрока из whitelist", self.cmd_wl_remove, True),
         }

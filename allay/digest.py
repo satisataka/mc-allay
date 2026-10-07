@@ -140,7 +140,7 @@ class Digest:
         tz = self.cfg.tz
         label = week_label(datetime.fromtimestamp(st["started_at"], tz), datetime.fromtimestamp(now, tz))
         title = (f"{e('digest')} <b>Итоги недели</b> · {label}" if final
-                 else f"{e('digest')} <b>Неделя пока что</b> · {label}")
+                 else f"{e('digest')} <b>Промежуточные итоги недели</b> · {label}")
         ph = self.bot.player_html
 
         visible = self.bot.visible_players()
