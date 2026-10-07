@@ -6,14 +6,13 @@ import re
 import time
 
 from .lang import mc_name
+from .logs import NICK_RE, archives, log_event, read_archive, read_latest, utc_offset
 from .stats import TOP, PlayerStats
 from .telegram import button, keyboard
 from .util import EMOJI, e, emoji, fmt_distance, fmt_duration, fmt_int, fmt_seen, fmt_size, load_json, log
-from .workers import Batcher
+from .workers import Batcher, beat
 
-NICK_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 TG_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{4,32}$")
-LOG_RE = re.compile(r"^\[[^\]]+\] \[Server thread/INFO\]: (.*)$")
 
 # a fresh player often gets several advancements in a row: they go out as one message
 ADVANCEMENT_BATCH_SECONDS = 45
@@ -201,7 +200,7 @@ class Allay:
         log.info(f"leave: {nick}")
 
     def on_death(self, msg):
-        result = self.deaths.translate(msg, self.player_html)
+        result = self.deaths.translate(msg, self.player_html, self.killer_html)
         if not result:
             return
         victim, text = result
@@ -210,6 +209,12 @@ class Allay:
             return
         self.send(f"{e('death')} {text}", silent=True)
         log.info(f"death: {msg}")
+
+    def killer_html(self, value):
+        """Html for a whitelisted player among death message args, None for mobs and items."""
+        if not NICK_RE.match(value) or self.server.uuid_of(value) is None:
+            return None
+        return "<b>???</b>" if self.is_hidden(value) else self.player_html(value)
 
     def on_advancement(self, msg):
         """Returns False if msg is not an advancement message."""
@@ -255,25 +260,56 @@ class Allay:
         self.send(text, silent=not loud)
 
     def handle_log_line(self, line):
-        m = LOG_RE.match(line)
-        if not m:
+        event = log_event(line)
+        if event is None:
             return
-        raw = m.group(1)
-        is_system = raw.startswith("System chat: ")
-        msg = raw.removeprefix("System chat: ")
-
-        if msg.endswith(" joined the game"):
-            nick = msg[: -len(" joined the game")]
-            if NICK_RE.match(nick):  # rejects chat lines like "<Ruslan> x joined the game"
-                self.on_join(nick)
-        elif msg.endswith(" left the game"):
-            nick = msg[: -len(" left the game")]
-            if NICK_RE.match(nick):
-                self.on_leave(nick)
-        elif msg.startswith("Done ("):
+        kind, value = event
+        if kind == "join":
+            self.on_join(value)
+        elif kind == "leave":
+            self.on_leave(value)
+        elif kind == "done":
             self.server.started_at = time.time()
-        elif not self.on_advancement(msg) and is_system:
-            self.on_death(msg)
+            self.sessions.clear()  # whoever was "online" before a restart isn't anymore
+        elif not self.on_advancement(value) and kind == "system":
+            self.on_death(value)
+
+    def restore_state(self, archive_limit=7):
+        """Uptime and play sessions after a bot restart, replayed from the server logs."""
+        try:
+            entries = read_latest(self.server.log_file)
+        except OSError:
+            entries = []
+        for ts, line in entries:
+            event = log_event(line)
+            if event is None:
+                continue
+            kind, nick = event
+            if kind == "done":
+                self.server.started_at = ts
+                self.sessions.clear()
+            elif kind == "join" and not self.is_hidden(nick):
+                self.sessions[nick.lower()] = ts
+            elif kind == "leave":
+                self.sessions.pop(nick.lower(), None)
+
+        # latest.log also rotates daily: a long-running server's start is in an archive
+        if self.server.started_at is None and entries:
+            offset = utc_offset(*entries[-1])
+            for path in archives(self.server.log_file.parent)[:archive_limit]:
+                try:
+                    done = [ts for ts, line in read_archive(path, offset) if log_event(line) == ("done", None)]
+                except OSError:
+                    continue
+                if done:
+                    self.server.started_at = done[-1]
+                    break
+
+        # the log can't tell a crash from a running server: keep only those actually online
+        online = self.online()
+        online_names = {n.lower() for n in online[2]} if online else set()
+        self.sessions = {k: v for k, v in self.sessions.items() if k in online_names}
+        log.info(f"restored: started_at={self.server.started_at}, sessions={sorted(self.sessions)}")
 
     # --- commands ---
 
@@ -550,8 +586,8 @@ class Allay:
         else:
             try:
                 reply = handler(args, msg)
-            except Exception as ex:
-                log.info(f"/{cmd} failed: {ex!r}")
+            except Exception:
+                log.exception(f"/{cmd} failed")
                 reply = "Не получилось выполнить команду 😕"
         # handlers return text, or (text, inline keyboard)
         text, markup = reply if isinstance(reply, tuple) else (reply, None)
@@ -559,7 +595,8 @@ class Allay:
 
     def handle_callback(self, query):
         """Inline button press: re-renders the message it belongs to."""
-        self.tg.call("answerCallbackQuery", callback_query_id=query["id"])  # stops the button spinner
+        # stops the button spinner; useless to retry, the query expires in seconds
+        self.tg.call("answerCallbackQuery", retry=False, callback_query_id=query["id"])
         msg = query.get("message")
         if not msg:
             return
@@ -574,8 +611,8 @@ class Allay:
             return
         try:
             text, markup = view(arg or None)
-        except Exception as ex:
-            log.info(f"button {query.get('data')} failed: {ex!r}")
+        except Exception:
+            log.exception(f"button {query.get('data')} failed")
             return
         self.tg.edit(chat["id"], msg["message_id"], text, keyboard=markup)
 
@@ -594,8 +631,10 @@ class Allay:
             self.tg.call("setMyCommands", commands=menu(admin=True), scope=scope)
 
     def poll_commands(self):
+        beat("poll_commands")
         me = self.tg.call("getMe")
         while me is None:
+            beat("poll_commands")
             time.sleep(10)
             me = self.tg.call("getMe")
         self.username = me["username"].lower()
@@ -608,10 +647,11 @@ class Allay:
         log.info(f"bot @{self.username} ready")
 
         while True:
+            beat("poll_commands")
             params = {"timeout": 50, "allowed_updates": ["message", "callback_query"]}
             if offset is not None:
                 params["offset"] = offset
-            updates = self.tg.call("getUpdates", http_timeout=60, **params)
+            updates = self.tg.call("getUpdates", http_timeout=60, retry=False, **params)  # the loop retries
             if updates is None:
                 time.sleep(5)
                 continue

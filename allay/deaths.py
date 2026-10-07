@@ -55,10 +55,11 @@ class DeathTranslator:
             return f"«{self.names.get(inner, inner)}»"
         return self.names.get(arg, arg)
 
-    def translate(self, msg, render_victim):
+    def translate(self, msg, render_victim, render_player=None):
         """Returns (victim, russian_text_html) or None if msg is not a death message.
 
         render_victim(nick) -> html for the first argument (the player who died).
+        render_player(arg) -> html if another argument is a player (a killer), else None.
         """
         for rx, ru_tpl in self.patterns:
             m = rx.match(msg)
@@ -74,7 +75,8 @@ class DeathTranslator:
                 value = args.get(f"a{n}", "")
                 if n == 1:
                     return render_victim(value)
-                return html.escape(self._ru_name(value))
+                player = render_player(value) if render_player else None
+                return player or html.escape(self._ru_name(value))
 
             return args.get("a1", ""), ARG_RE.sub(sub, ru_tpl)
         return None

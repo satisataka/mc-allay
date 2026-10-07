@@ -17,6 +17,12 @@ class _RedactFilter(logging.Filter):
     def filter(self, record):
         record.msg = str(record.getMessage()).replace(self.secret, "***")
         record.args = None
+        # tracebacks too: requests exceptions carry the full API URL
+        if record.exc_info:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+            record.exc_info = None
+        if record.exc_text:
+            record.exc_text = record.exc_text.replace(self.secret, "***")
         return True
 
 

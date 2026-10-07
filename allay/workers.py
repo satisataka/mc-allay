@@ -8,13 +8,26 @@ import time
 from .util import log
 
 
+heartbeats = {}  # worker name -> when it last proved to be alive, see the watchdog in __main__
+
+
+def beat(name):
+    heartbeats[name] = time.time()
+
+
+def stale_workers(limit):
+    """Workers that haven't beaten for `limit` seconds: stuck, e.g. on a hung socket."""
+    now = time.time()
+    return sorted(name for name, at in heartbeats.items() if now - at > limit)
+
+
 def run_forever(fn, name):
     def wrapper():
         while True:
             try:
                 fn()
-            except Exception as ex:
-                log.info(f"{name} crashed: {ex!r}, restarting in 10s")
+            except Exception:
+                log.exception(f"{name} crashed, restarting in 10s")
                 time.sleep(10)
     threading.Thread(target=wrapper, name=name, daemon=True).start()
 
@@ -42,14 +55,15 @@ class Batcher:
             items = self._pending.pop(key, [])
         try:
             self.flush(key, items)
-        except Exception as ex:
-            log.info(f"batch flush for {key} failed: {ex!r}")
+        except Exception:
+            log.exception(f"batch flush for {key} failed")
 
 
 def follow_log(path, on_line):
     """tail -F: calls on_line for every new complete line, survives log rotation."""
     first_open = True
     while True:
+        beat("follow_log")
         try:
             f = open(path, encoding="utf-8", errors="replace")
         except FileNotFoundError:
@@ -63,14 +77,15 @@ def follow_log(path, on_line):
             log.info(f"watching {path}")
             buf = ""
             while True:
+                beat("follow_log")
                 chunk = f.readline()
                 if chunk:
                     buf += chunk
                     if buf.endswith("\n"):
                         try:
                             on_line(buf.rstrip("\n"))
-                        except Exception as ex:
-                            log.info(f"log line handler error: {ex!r}")
+                        except Exception:
+                            log.exception("log line handler error")
                         buf = ""
                     continue
                 time.sleep(0.5)
@@ -86,6 +101,7 @@ def watch_whitelist(path, on_added):
     """Polls whitelist.json and calls on_added(nick) for every newly added player."""
     known = None  # lowercased nick -> nick
     while True:
+        beat("watch_whitelist")
         try:
             names = {x["name"].lower(): x["name"] for x in json.loads(path.read_text())}
         except (OSError, ValueError, KeyError, TypeError):

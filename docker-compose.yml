@@ -13,6 +13,12 @@ services:
     networks:
       - minecraft
     restart: unless-stopped
+    healthcheck:
+      # the bot refreshes the file every 30 s while all its workers are alive
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/allay-healthy') > 120)"]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
     logging:
       driver: json-file
       options:

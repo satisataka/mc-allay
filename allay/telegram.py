@@ -1,8 +1,15 @@
 """Minimal Telegram Bot API client."""
 
+import time
+
 import requests
 
 from .util import log
+
+# pauses between attempts when Telegram or the proxy is unreachable: ~50 s in total,
+# enough to ride out a tunnel restart without losing announcements
+RETRY_DELAYS = (2, 5, 15, 30)
+MAX_RETRY_AFTER = 60  # longer flood-control waits aren't worth blocking a worker for
 
 
 class Telegram:
@@ -12,17 +19,39 @@ class Telegram:
         if proxy:
             self._session.proxies = {"https": proxy, "http": proxy}
 
-    def call(self, method, http_timeout=15, **params):
-        try:
-            resp = self._session.post(self._api + method, json=params, timeout=http_timeout)
-            data = resp.json()
-        except (requests.RequestException, ValueError) as ex:
-            log.info(f"telegram {method} failed: {ex}")
-            return None
-        if not data.get("ok"):
-            log.info(f"telegram {method} error: {data}")
-            return None
-        return data["result"]
+    def call(self, method, http_timeout=15, retry=True, **params):
+        """Returns the result, or None on failure.
+
+        Network errors, 5xx and 429 (flood control) are retried; other API errors are not.
+        A retry after a timeout may duplicate a message that did get through.
+        """
+        delays = list(RETRY_DELAYS) if retry else []
+        while True:
+            try:
+                resp = self._session.post(self._api + method, json=params, timeout=http_timeout)
+                data = resp.json()
+            except (requests.RequestException, ValueError) as ex:
+                error, wait = f"failed: {ex}", delays.pop(0) if delays else None
+            else:
+                if data.get("ok"):
+                    return data["result"]
+                code = data.get("error_code", 0)
+                if "message is not modified" in data.get("description", ""):
+                    return None  # the same button pressed twice
+                error = f"error: {data}"
+                retry_after = data.get("parameters", {}).get("retry_after")
+                if code == 429 and retry_after and retry_after <= MAX_RETRY_AFTER and delays:
+                    delays.pop(0)
+                    wait = retry_after
+                elif code >= 500 and delays:
+                    wait = delays.pop(0)
+                else:
+                    wait = None
+            if wait is None:
+                log.info(f"telegram {method} {error}")
+                return None
+            log.info(f"telegram {method} {error}, retrying in {wait}s")
+            time.sleep(wait)
 
     def send(self, chat_id, text, silent=False, reply_to=None, keyboard=None):
         params = {
