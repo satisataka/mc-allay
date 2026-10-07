@@ -86,6 +86,11 @@ EMOJI = {
     "dusk": ("🌅", None),
     "difficulty": ("🎚", None),
     "version": ("🧩", None),
+    # weekly digest
+    "digest": ("📰", None),
+    "newcomer": ("🆕", None),
+    "funny_death": ("🤡", None),
+    "killer": ("👹", None),
     # admin alerts (also use offline, backup, disk)
     "alert_ok": ("✅", None),
     "alert_crash": ("💥", None),

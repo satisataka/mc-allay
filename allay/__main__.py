@@ -7,6 +7,7 @@ from .advancements import AdvancementParser
 from .bot import Allay
 from .config import Config, ConfigError
 from .deaths import DeathTranslator
+from .digest import Digest
 from .lang import load_lang
 from .monitor import Monitor
 from .rcon import Rcon
@@ -39,6 +40,11 @@ def main():
         bot.restore_state()
     except Exception:  # nice to have, never a reason not to start
         log.exception("restoring state from logs failed")
+    try:
+        bot.digest = Digest(bot)
+        run_forever(bot.digest.run, "digest")
+    except Exception:  # e.g. state/ not writable: the rest of the bot still works
+        log.exception("weekly digest disabled")
     run_forever(lambda: follow_log(server.log_file, bot.handle_log_line), "follow_log")
     run_forever(lambda: watch_whitelist(server.whitelist_file, bot.announce_new_player), "watch_whitelist")
     run_forever(bot.poll_commands, "poll_commands")

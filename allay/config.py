@@ -27,6 +27,24 @@ def _int(name, default=None):
         raise ConfigError(f"env var {name} must be an integer, got {raw!r}") from None
 
 
+def _weekday(name, default):
+    day = _int(name, default)
+    if not 1 <= day <= 7:
+        raise ConfigError(f"env var {name} must be 1-7 (Monday-Sunday), got {day}")
+    return day
+
+
+def _clock(name, default):
+    raw = _str(name, default)
+    try:
+        hour, minute = map(int, raw.split(":"))
+        if 0 <= hour < 24 and 0 <= minute < 60:
+            return hour, minute
+    except ValueError:
+        pass
+    raise ConfigError(f"env var {name} must be HH:MM, got {raw!r}")
+
+
 @dataclass(frozen=True)
 class Config:
     tg_token: str
@@ -52,6 +70,9 @@ class Config:
     alert_backup_hours: int
     alert_disk_gb: int
     alert_repeat_hours: int
+    # weekly digest: day 1-7 (Mon-Sun) and (hour, minute) in tz
+    digest_weekday: int
+    digest_time: tuple[int, int]
 
     @classmethod
     def from_env(cls):
@@ -80,4 +101,6 @@ class Config:
             alert_backup_hours=_int("ALERT_BACKUP_HOURS", 14),
             alert_disk_gb=_int("ALERT_DISK_GB", 5),
             alert_repeat_hours=_int("ALERT_REPEAT_HOURS", 6),
+            digest_weekday=_weekday("DIGEST_WEEKDAY", 7),
+            digest_time=_clock("DIGEST_TIME", "20:00"),
         )

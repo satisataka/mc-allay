@@ -46,6 +46,7 @@ class Allay:
         self.deaths = deaths
         self.advancements = advancements
         self.ru = ru  # russian lang file, for block/mob names in /stats
+        self.digest = None  # set in __main__: needs the bot to take its first snapshot
         self.adv_batch = Batcher(ADVANCEMENT_BATCH_SECONDS, self.announce_advancements)
         self.adv_seen = set()  # advancement ids announced since start (files may lag behind)
         self.sessions = {}  # lowercased nick -> join timestamp
@@ -57,6 +58,7 @@ class Allay:
             "world": ("Информация о мире", self.cmd_world, False),
             "top": ("Рейтинги игроков", self.cmd_top, False),
             "stats": ("Статистика игрока: [ник]", self.cmd_stats, False),
+            "week": ("Итоги недели на сейчас", self.cmd_week, False),
             "wl_add": ("Добавить игрока: ник [@telegram]", self.cmd_wl_add, True),
             "wl_remove": ("Удалить игрока из whitelist", self.cmd_wl_remove, True),
         }
@@ -144,11 +146,14 @@ class Allay:
             f"{e('lock')} При первом входе: <code>/register пароль пароль</code>\n\n"
             f"Ребята, покажите новенькому, где тут что {e('pickaxe')}"
         )
-        if self.cfg.channel_id and self.post_to_channel(text):
-            log.info(f"announced new player {nick} via channel")
-            return
-        self.send(text)
+        self.publish(text)
         log.info(f"announced new player {nick}")
+
+    def publish(self, text):
+        """Posts to the channel (the chat gets it as an auto-forward), or to the chat without one."""
+        if self.cfg.channel_id and self.post_to_channel(text):
+            return True
+        return self.send(text) is not None
 
     def post_to_channel(self, text):
         """Publishes text in the channel; the chat gets it as the linked channel's auto-forward.
@@ -203,11 +208,13 @@ class Allay:
         result = self.deaths.translate(msg, self.player_html, self.killer_html)
         if not result:
             return
-        victim, text = result
+        victim, text, key = result
         # only real players: rejects named mobs and anything that isn't in the whitelist
         if not NICK_RE.match(victim) or self.server.uuid_of(victim) is None or self.is_hidden(victim):
             return
         self.send(f"{e('death')} {text}", silent=True)
+        if self.digest:
+            self.digest.record_death(victim, key, text)
         log.info(f"death: {msg}")
 
     def killer_html(self, value):
@@ -236,6 +243,8 @@ class Allay:
             self.adv_seen.add(adv.id)
 
         self.adv_batch.add(nick, (adv, first))
+        if self.digest:
+            self.digest.record_advancement(nick, adv, first)
         log.info(f"advancement: {nick} {adv.frame} {adv.id} (first={first})")
         return True
 
@@ -415,6 +424,11 @@ class Allay:
                 f" · {fmt_duration(most_active[2].play_seconds)}",
             ]
         return "\n".join(lines)
+
+    def cmd_week(self, args, msg):
+        if self.digest is None:
+            return "Дайджест ещё не готов"
+        return self.digest.preview()
 
     def cmd_top(self, args, msg):
         if len(args) > 1 or (args and args[0].lower() not in TOP):

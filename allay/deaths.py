@@ -28,17 +28,17 @@ class DeathTranslator:
 
     @staticmethod
     def _load(en, ru):
-        """Returns ([(regex, ru_template)], en->ru name map)."""
+        """Returns ([(regex, ru_template, key)], en->ru name map)."""
         patterns = []
         for key, en_tpl in en.items():
             if not key.startswith("death.") or key not in ru:
                 continue
             try:
-                patterns.append((_template_regex(en_tpl), ru[key], len(ARG_RE.sub("", en_tpl))))
+                patterns.append((_template_regex(en_tpl), ru[key], key, len(ARG_RE.sub("", en_tpl))))
             except re.error:
                 continue  # duplicate arg in one template, skip
         # most specific first: "slain by X using Y" must win over "slain by X"
-        patterns.sort(key=lambda p: p[2], reverse=True)
+        patterns.sort(key=lambda p: p[3], reverse=True)
 
         names = {
             en[k]: ru[k]
@@ -46,7 +46,7 @@ class DeathTranslator:
             if k in ru and k.startswith(("entity.minecraft.", "item.minecraft.", "block.minecraft."))
         }
         log.info(f"loaded {len(patterns)} death messages, {len(names)} names")
-        return [(rx, tpl) for rx, tpl, _ in patterns], names
+        return [(rx, tpl, key) for rx, tpl, key, _ in patterns], names
 
     def _ru_name(self, arg):
         """Translate mob/item names; items come as '[Iron Sword]', player names stay as is."""
@@ -56,12 +56,12 @@ class DeathTranslator:
         return self.names.get(arg, arg)
 
     def translate(self, msg, render_victim, render_player=None):
-        """Returns (victim, russian_text_html) or None if msg is not a death message.
+        """Returns (victim, russian_text_html, lang_key) or None if msg is not a death message.
 
         render_victim(nick) -> html for the first argument (the player who died).
         render_player(arg) -> html if another argument is a player (a killer), else None.
         """
-        for rx, ru_tpl in self.patterns:
+        for rx, ru_tpl, key in self.patterns:
             m = rx.match(msg)
             if not m:
                 continue
@@ -78,5 +78,5 @@ class DeathTranslator:
                 player = render_player(value) if render_player else None
                 return player or html.escape(self._ru_name(value))
 
-            return args.get("a1", ""), ARG_RE.sub(sub, ru_tpl)
+            return args.get("a1", ""), ARG_RE.sub(sub, ru_tpl), key
         return None
