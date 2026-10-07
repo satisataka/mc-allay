@@ -1,0 +1,27 @@
+services:
+  allay:
+    build: .
+    image: allay:latest
+    container_name: allay
+    env_file: .env
+    volumes:
+      - ${MC_DIR:-/opt/minecraft}/data:/data:ro
+      # the only server file the bot writes to (/wl_add, /wl_remove)
+      - ${MC_DIR:-/opt/minecraft}/data/whitelist.json:/data/whitelist.json
+      - ${MC_DIR:-/opt/minecraft}/backups:/backups:ro
+      - ${ALLAY_STATE_DIR:-./state}:/state
+    networks:
+      - minecraft
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+# Joins the network of the Minecraft compose project, so "mc" (RCON) and
+# "tg-tunnel" (proxy) resolve by service name.
+networks:
+  minecraft:
+    name: ${MC_NETWORK:-minecraft_default}
+    external: true

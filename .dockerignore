@@ -1,0 +1,5 @@
+.git
+.env
+state/
+players.json
+**/__pycache__

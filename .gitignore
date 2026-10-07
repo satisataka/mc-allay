@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Allay runtime state (players.json with telegram usernames)
+state/
+players.json
