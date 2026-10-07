@@ -56,7 +56,9 @@ def button(text, data):
     return {"text": text, "callback_data": data}
 
 
-def keyboard(buttons, per_row=3):
-    if not buttons:
-        return None
-    return {"inline_keyboard": [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]}
+def keyboard(buttons, per_row=3, footer=None):
+    """Buttons in rows of per_row; footer (e.g. a back button) gets a full-width row of its own."""
+    rows = [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
+    if footer:
+        rows.append([footer])
+    return {"inline_keyboard": rows} if rows else None

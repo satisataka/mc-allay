@@ -422,9 +422,8 @@ class Allay:
 
         buttons = [button(f"{EMOJI[icon][0]} {label}", f"top:{k}")
                    for k, (icon, _, label, _, _) in TOP.items() if k != key]
-        if key in TOP:
-            buttons.append(button("« Все категории", "top:"))
-        return "\n".join(lines), keyboard(buttons)
+        back = button("⬅️ Все категории", "top:") if key in TOP else None
+        return "\n".join(lines), keyboard(buttons, footer=back)
 
     def stats_view(self, nick):
         nick = self.find_nick(nick or "")
