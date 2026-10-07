@@ -58,6 +58,10 @@ EMOJI = {
     "p_never":    ("⚫", "4902235874487436351"),
     "leave":      ("🚪", "5071095554566521757"),
     "death":      ("💀", None),
+    # advancements
+    "adv":           ("🏅", None),
+    "adv_challenge": ("🏆", None),
+    "adv_first":     ("🥇", None),
 }
 
 

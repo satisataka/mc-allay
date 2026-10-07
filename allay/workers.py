@@ -19,6 +19,33 @@ def run_forever(fn, name):
     threading.Thread(target=wrapper, name=name, daemon=True).start()
 
 
+class Batcher:
+    """Groups items by key: flush(key, items) runs `delay` seconds after the key's first item."""
+
+    def __init__(self, delay, flush):
+        self.delay = delay
+        self.flush = flush
+        self._pending = {}
+        self._lock = threading.Lock()
+
+    def add(self, key, item):
+        with self._lock:
+            if key not in self._pending:
+                self._pending[key] = []
+                timer = threading.Timer(self.delay, self._fire, [key])
+                timer.daemon = True
+                timer.start()
+            self._pending[key].append(item)
+
+    def _fire(self, key):
+        with self._lock:
+            items = self._pending.pop(key, [])
+        try:
+            self.flush(key, items)
+        except Exception as ex:
+            log.info(f"batch flush for {key} failed: {ex!r}")
+
+
 def follow_log(path, on_line):
     """tail -F: calls on_line for every new complete line, survives log rotation."""
     first_open = True

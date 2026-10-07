@@ -6,18 +6,30 @@ import re
 import time
 
 from .util import e, fmt_duration, fmt_seen, fmt_size, load_json, log
+from .workers import Batcher
 
 NICK_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 TG_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{4,32}$")
 LOG_RE = re.compile(r"^\[[^\]]+\] \[Server thread/INFO\]: (.*)$")
 
+# a fresh player often gets several advancements in a row: they go out as one message
+ADVANCEMENT_BATCH_SECONDS = 45
+ADVANCEMENT_VERBS = {
+    "task": "получил достижение",
+    "goal": "достиг цели",
+    "challenge": "завершил испытание",
+}
+
 
 class Allay:
-    def __init__(self, cfg, tg, server, deaths):
+    def __init__(self, cfg, tg, server, deaths, advancements):
         self.cfg = cfg
         self.tg = tg
         self.server = server
         self.deaths = deaths
+        self.advancements = advancements
+        self.adv_batch = Batcher(ADVANCEMENT_BATCH_SECONDS, self.announce_advancements)
+        self.adv_seen = set()  # advancement ids announced since start (files may lag behind)
         self.sessions = {}  # lowercased nick -> join timestamp
         self.username = ""
         # name -> (description, handler(args), admin_only)
@@ -150,6 +162,51 @@ class Allay:
         self.send(f"{e('death')} {text}", silent=True)
         log.info(f"death: {msg}")
 
+    def on_advancement(self, msg):
+        """Returns False if msg is not an advancement message."""
+        parsed = self.advancements.parse(msg)
+        if not parsed:
+            return False
+        nick, adv = parsed
+        if not adv.notable or self.is_hidden(nick):
+            return True
+        uuid = self.server.uuid_of(nick)
+        if uuid is None:
+            return True  # not a whitelisted player
+
+        first = False
+        if adv.id is not None and adv.id not in self.adv_seen:
+            # hidden players (admin testing things) don't take "first" away from others
+            hidden = {x.get("uuid") for x in self.server.whitelist() if self.is_hidden(x.get("name", ""))}
+            first = not (self.server.advancement_done_by(adv.id) - {uuid} - hidden)
+            self.adv_seen.add(adv.id)
+
+        self.adv_batch.add(nick, (adv, first))
+        log.info(f"advancement: {nick} {adv.frame} {adv.id} (first={first})")
+        return True
+
+    def announce_advancements(self, nick, items):
+        name = self.player_html(nick)
+        loud = any(first for _, first in items)
+        icon = e("adv_first") if loud else e("adv_challenge") if any(
+            adv.frame == "challenge" for adv, _ in items) else e("adv")
+
+        if len(items) == 1:
+            adv, first = items[0]
+            text = f"{icon} {name} {ADVANCEMENT_VERBS[adv.frame]} «{html.escape(adv.title)}»"
+            if first:
+                text += " — первым на сервере!"
+            if adv.description:
+                text += f"\n<i>{html.escape(adv.description)}</i>"
+        else:
+            titles = ", ".join(
+                f"«{html.escape(adv.title)}»" + (" (первым на сервере!)" if first else "")
+                for adv, first in items
+            )
+            text = f"{icon} {name} получил достижения: {titles}"
+        # only "first on the server" is worth a notification
+        self.send(text, silent=not loud)
+
     def handle_log_line(self, line):
         m = LOG_RE.match(line)
         if not m:
@@ -168,7 +225,7 @@ class Allay:
                 self.on_leave(nick)
         elif msg.startswith("Done ("):
             self.server.started_at = time.time()
-        elif is_system:
+        elif not self.on_advancement(msg) and is_system:
             self.on_death(msg)
 
     # --- commands ---

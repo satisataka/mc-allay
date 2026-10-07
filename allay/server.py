@@ -28,6 +28,8 @@ class Server:
         self.log_file = data_dir / "logs/latest.log"
         self.whitelist_file = data_dir / "whitelist.json"
         self._player_data = data_dir / "world/players/data"
+        # new world layout keeps them under players/, older versions in world/advancements
+        self._advancement_dirs = [data_dir / "world/players/advancements", data_dir / "world/advancements"]
         self.started_at = None  # set when "Done (...)" is seen in the log
         self._world_cache = {"at": 0.0, "size": 0}
 
@@ -87,6 +89,20 @@ class Server:
             if entry.get("name", "").lower() == nick.lower():
                 return entry.get("uuid")
         return None
+
+    def advancement_done_by(self, adv_id):
+        """UUIDs whose saved advancements file has minecraft:<adv_id> completed.
+
+        Files are saved on autosave/leave, so very fresh progress may be missing.
+        """
+        key = f"minecraft:{adv_id}"
+        done = set()
+        for d in self._advancement_dirs:
+            for path in d.glob("*.json"):
+                entry = load_json(path, {}).get(key)
+                if isinstance(entry, dict) and entry.get("done"):
+                    done.add(path.stem)
+        return done
 
     def last_seen(self, uuid):
         try:

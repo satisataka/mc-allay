@@ -3,7 +3,7 @@
 import html
 import re
 
-from .util import load_json, log
+from .util import log
 
 ARG_RE = re.compile(r"%(?:(\d+)\$)?s")
 
@@ -23,18 +23,12 @@ def _template_regex(template):
 
 
 class DeathTranslator:
-    def __init__(self, lang_dir):
-        self.patterns, self.names = self._load(lang_dir)
+    def __init__(self, en, ru):
+        self.patterns, self.names = self._load(en, ru)
 
     @staticmethod
-    def _load(lang_dir):
-        """Returns ([(regex, ru_template)], en->ru name map) or ([], {}) if files are missing."""
-        en = load_json(lang_dir / "en_us.json", {})
-        ru = load_json(lang_dir / "ru_ru.json", {})
-        if not en or not ru:
-            log.info(f"no language files in {lang_dir}, death messages stay in english")
-            return [], {}
-
+    def _load(en, ru):
+        """Returns ([(regex, ru_template)], en->ru name map)."""
         patterns = []
         for key, en_tpl in en.items():
             if not key.startswith("death.") or key not in ru:
