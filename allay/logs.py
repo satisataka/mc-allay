@@ -19,7 +19,7 @@ DAY = 86400
 
 
 def log_event(line):
-    """('join' | 'leave', nick), ('done', None), ('system' | 'message', text), or None."""
+    """('join' | 'leave', nick), ('done' | 'stopping', None), ('system' | 'message', text), or None."""
     m = LOG_RE.match(line)
     if not m:
         return None
@@ -32,6 +32,8 @@ def log_event(line):
             return (kind, nick) if NICK_RE.match(nick) else None
     if msg.startswith("Done ("):
         return "done", None
+    if msg == "Stopping server":  # a planned stop, unlike a crash
+        return "stopping", None
     return ("system" if raw.startswith("System chat: ") else "message"), msg
 
 

@@ -32,6 +32,8 @@ class Server:
         self._advancement_dirs = [data_dir / "world/players/advancements", data_dir / "world/advancements"]
         self._stats_dirs = [data_dir / "world/players/stats", data_dir / "world/stats"]
         self.started_at = None  # set when "Done (...)" is seen in the log
+        self.stopping_at = None  # set on "Stopping server", cleared by the next "Done"
+        self.crash_dir = data_dir / "crash-reports"
         self._world_cache = {"at": 0.0, "size": 0}
 
     # --- rcon ---

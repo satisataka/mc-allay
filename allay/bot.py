@@ -270,7 +270,10 @@ class Allay:
             self.on_leave(value)
         elif kind == "done":
             self.server.started_at = time.time()
+            self.server.stopping_at = None
             self.sessions.clear()  # whoever was "online" before a restart isn't anymore
+        elif kind == "stopping":
+            self.server.stopping_at = time.time()
         elif not self.on_advancement(value) and kind == "system":
             self.on_death(value)
 
@@ -287,7 +290,10 @@ class Allay:
             kind, nick = event
             if kind == "done":
                 self.server.started_at = ts
+                self.server.stopping_at = None
                 self.sessions.clear()
+            elif kind == "stopping":
+                self.server.stopping_at = ts
             elif kind == "join" and not self.is_hidden(nick):
                 self.sessions[nick.lower()] = ts
             elif kind == "leave":

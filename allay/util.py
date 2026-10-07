@@ -86,6 +86,10 @@ EMOJI = {
     "dusk": ("🌅", None),
     "difficulty": ("🎚", None),
     "version": ("🧩", None),
+    # admin alerts (also use offline, backup, disk)
+    "alert_ok": ("✅", None),
+    "alert_crash": ("💥", None),
+    "alert_lag": ("🐢", None),
 }
 
 

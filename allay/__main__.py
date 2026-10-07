@@ -8,6 +8,7 @@ from .bot import Allay
 from .config import Config, ConfigError
 from .deaths import DeathTranslator
 from .lang import load_lang
+from .monitor import Monitor
 from .rcon import Rcon
 from .server import Server
 from .telegram import Telegram
@@ -41,6 +42,10 @@ def main():
     run_forever(lambda: follow_log(server.log_file, bot.handle_log_line), "follow_log")
     run_forever(lambda: watch_whitelist(server.whitelist_file, bot.announce_new_player), "watch_whitelist")
     run_forever(bot.poll_commands, "poll_commands")
+    if cfg.admin_id:
+        run_forever(Monitor(bot).run, "monitor")
+    else:
+        log.info("TG_ADMIN_ID is not set, admin alerts are disabled")
     # watchdog: exit when a worker is stuck, so docker restarts the whole bot
     while True:
         stuck = stale_workers(STUCK_AFTER)

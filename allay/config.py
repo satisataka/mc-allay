@@ -44,6 +44,14 @@ class Config:
     backups_dir: Path
     players_file: Path
     lang_dir: Path
+    # admin alerts (sent only when admin_id is set)
+    alert_down_minutes: int
+    alert_restart_minutes: int
+    alert_mspt: int
+    alert_lag_minutes: int
+    alert_backup_hours: int
+    alert_disk_gb: int
+    alert_repeat_hours: int
 
     @classmethod
     def from_env(cls):
@@ -65,4 +73,11 @@ class Config:
             backups_dir=Path(_str("BACKUPS_DIR", "/backups")),
             players_file=Path(_str("PLAYERS_FILE", "/state/players.json")),
             lang_dir=Path(_str("LANG_DIR", "/app/lang")),
+            alert_down_minutes=_int("ALERT_DOWN_MINUTES", 2),
+            alert_restart_minutes=_int("ALERT_RESTART_MINUTES", 5),
+            alert_mspt=_int("ALERT_MSPT", 50),
+            alert_lag_minutes=_int("ALERT_LAG_MINUTES", 5),
+            alert_backup_hours=_int("ALERT_BACKUP_HOURS", 14),
+            alert_disk_gb=_int("ALERT_DISK_GB", 5),
+            alert_repeat_hours=_int("ALERT_REPEAT_HOURS", 6),
         )
