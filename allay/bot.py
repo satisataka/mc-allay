@@ -84,12 +84,26 @@ class Allay:
             f"{e('lock')} При первом входе: <code>/register пароль пароль</code>\n\n"
             f"Ребята, покажите новенькому, где тут что {e('pickaxe')}"
         )
-        msg = self.send(text)
-        # bots can't use custom emoji in channels directly, but a forward keeps them
-        if msg and self.cfg.channel_id:
-            self.tg.call("forwardMessage", chat_id=self.cfg.channel_id,
-                         from_chat_id=self.cfg.chat_id, message_id=msg["message_id"])
+        if self.cfg.channel_id and self.post_to_channel(text):
+            log.info(f"announced new player {nick} via channel")
+            return
+        self.send(text)
         log.info(f"announced new player {nick}")
+
+    def post_to_channel(self, text):
+        """Publishes text in the channel; the chat gets it as the linked channel's auto-forward.
+
+        Bots can't use custom emoji in channels directly, but a forward keeps them: the text
+        is drafted in the admin's private chat (or the server chat), forwarded and deleted.
+        """
+        draft_chat = self.cfg.admin_id or self.cfg.chat_id
+        draft = self.tg.send(draft_chat, text, silent=True)
+        if not draft:
+            return False
+        posted = self.tg.call("forwardMessage", chat_id=self.cfg.channel_id,
+                              from_chat_id=draft_chat, message_id=draft["message_id"])
+        self.tg.call("deleteMessage", chat_id=draft_chat, message_id=draft["message_id"])
+        return posted is not None
 
     def on_join(self, nick):
         if self.is_hidden(nick):
