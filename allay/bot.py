@@ -390,17 +390,20 @@ class Allay:
     def cmd_world(self, args, msg):
         lines = [f"{e('world')} <b>{html.escape(self.cfg.server_name)}</b>", ""]
 
-        day, daytime = self.server.time_query("day"), self.server.time_query("daytime")
-        if day is not None and daytime is not None:
+        world_time = self.server.world_time()
+        day, daytime = world_time or (None, None)
+        if daytime is not None:
             clock, icon, phase = world_clock(daytime)
-            lines.append(f"{e(icon)} День {fmt_int(day + 1)} · {clock}, {phase}")
+            lines.append(f"{e(icon)} " + (f"День {fmt_int(day)} · " if day else "") + f"{clock}, {phase}")
+        elif day:
+            lines.append(f"{e('day')} День {fmt_int(day)}")
         difficulty = self.server.difficulty()
         if difficulty:
             lines.append(f"{e('difficulty')} Сложность: {DIFFICULTY.get(difficulty, difficulty)}")
         version = self.server.version()
         if version:
             lines.append(f"{e('version')} Версия: {html.escape(version)}")
-        if day is None:
+        if world_time is None:
             lines.append("<i>Сервер недоступен, время и сложность неизвестны</i>")
 
         players = self.played_stats()

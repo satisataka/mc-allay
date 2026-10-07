@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 
-from .util import load_json
+from .util import load_json, log
 
 LIST_RE = re.compile(r"There are (\d+) of a max of (\d+) players online:?\s*(.*)")
 
@@ -55,10 +55,33 @@ class Server:
             return None
         return float(avg.group(1)), float(p95.group(1)) if p95 else None
 
-    def time_query(self, what):
-        """`time query day|daytime|gametime` as int, or None."""
-        m = re.search(r"The time is (\d+)", self.rcon.command(f"time query {what}") or "")
-        return int(m.group(1)) if m else None
+    def world_time(self):
+        """(day number from 1, ticks since 6:00), either may be None; None if the server is down.
+
+        Since 26.x time runs on world clocks: "time query time" answers
+        "Clock minecraft:overworld is at <daylight cycle ticks> tick(s)", which gives both values.
+        Older servers answer "The time is <n>" to "time query day" / "time query daytime".
+        """
+        out = self.rcon.command("time query time")
+        if out is None:
+            return None
+        clock = re.search(r"Clock \S+ is at (\d+) tick", out)
+        if clock:
+            ticks = int(clock.group(1))
+            return ticks // 24000 + 1, ticks % 24000
+
+        day = self.rcon.command("time query day") or ""
+        old = re.search(r"The time is (\d+)", day)
+        if old:
+            m = re.search(r"The time is (\d+)", self.rcon.command("time query daytime") or "")
+            return int(old.group(1)) + 1, int(m.group(1)) if m else None
+
+        # 26.x without the default clock answer: the day timeline and its repetitions
+        m = re.search(r"Timeline \S+ is at (\d+) tick", day)
+        reps = re.search(r"has passed (\d+) repetition", self.rcon.command("time query day repetition") or "")
+        if not (m or reps):
+            log.info(f"unexpected `time query` answers: {out!r}, {day!r}")
+        return (int(reps.group(1)) + 1 if reps else None), (int(m.group(1)) % 24000 if m else None)
 
     def difficulty(self):
         """'Normal', 'Hard', ... or None."""

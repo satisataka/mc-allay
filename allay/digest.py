@@ -82,7 +82,7 @@ class Digest:
             "started_at": now,
             "stats": stats,
             "world_size": self.server.world_size(),
-            "day": self.server.time_query("day"),
+            "day": (self.server.world_time() or (None, None))[0],
             "prev_play": prev_play,  # previous week's total play time, for the comparison
             "deaths": [],
             "advancements": [],
@@ -193,7 +193,7 @@ class Digest:
         growth = self.server.world_size() - (st.get("world_size") or 0)
         if st.get("world_size") and growth > 0:
             world.append(f"мир подрос на {fmt_size(growth)}")
-        day = self.server.time_query("day")
+        day = (self.server.world_time() or (None, None))[0]
         if day is not None and st.get("day") is not None and day > st["day"]:
             passed = day - st["day"]
             world.append(f"в игре прошло {passed} {days_word(passed)}")
