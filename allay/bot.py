@@ -61,6 +61,7 @@ class Allay:
             "week": ("Промежуточные итоги недели", self.cmd_week, False),
             "wl_add": ("Добавить игрока: ник [@telegram]", self.cmd_wl_add, True),
             "wl_remove": ("Удалить игрока из whitelist", self.cmd_wl_remove, True),
+            "reset_password": ("Сбросить пароль игрока: ник", self.cmd_reset_password, True),
         }
 
     # --- helpers ---
@@ -582,6 +583,33 @@ class Allay:
         if not reloaded:
             text += "\n<i>Сервер недоступен, whitelist применится при запуске</i>"
         return text
+
+    def cmd_reset_password(self, args, msg):
+        if len(args) != 1 or not NICK_RE.match(args[0]):
+            return "Использование: <code>/reset_password ник</code>"
+        # any whitelisted player, hidden ones included: it's an admin command
+        nick = next((x["name"] for x in self.server.whitelist()
+                     if x.get("name", "").lower() == args[0].lower()), None)
+        if nick is None:
+            return f"Игрока <b>{html.escape(args[0])}</b> нет в whitelist"
+        name = f"<b>{html.escape(nick)}</b>"
+
+        ok, out = self.server.auth_reset(nick)
+        log.info(f"reset_password: {nick} (ok={ok}, answer={out!r})")
+        if out is None:
+            return f"{e('offline')} Сервер недоступен, пароль {name} не сброшен"
+        answer = f"\nСервер: <code>{html.escape(out.strip() or 'пустой ответ')}</code>"
+        if not ok:
+            return f"Не получилось сбросить пароль {name}" + answer
+
+        lines = [f"{e('lock')} Пароль {name} сброшен" + answer,
+                 f"При входе: <code>/register пароль пароль</code>"]
+        online = self.server.online_players()
+        if online and nick.lower() in {n.lower() for n in online[2]}:
+            # an authorized session would outlive the reset
+            if self.server.kick(nick, "Пароль сброшен. Зайди снова и задай новый: /register пароль пароль"):
+                lines.append("Игрок был онлайн, кикнул его")
+        return "\n".join(lines)
 
     def handle_message(self, msg):
         user_id = msg.get("from", {}).get("id")

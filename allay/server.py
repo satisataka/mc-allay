@@ -10,6 +10,10 @@ import uuid
 from .util import load_json, log
 
 LIST_RE = re.compile(r"There are (\d+) of a max of (\d+) players online:?\s*(.*)")
+# EasyAuth: drops the player's registration, they /register again on the next join
+AUTH_RESET_COMMAND = "auth remove {nick}"
+# answers that mean the command itself didn't run
+COMMAND_FAILED_RE = re.compile(r"Unknown or incomplete command|Incorrect argument|Unknown command|<--\[HERE\]")
 
 
 def offline_uuid(nick):
@@ -108,6 +112,14 @@ class Server:
         entries = [x for x in entries if x.get("name", "").lower() != nick.lower()]
         entries.append({"uuid": uuid, "name": nick})
         return uuid, already, self._write_whitelist(entries)
+
+    def auth_reset(self, nick):
+        """(ok, server answer); answer is None if the server is down."""
+        out = self.rcon.command(AUTH_RESET_COMMAND.format(nick=nick))
+        return out is not None and not COMMAND_FAILED_RE.search(out), out
+
+    def kick(self, nick, reason):
+        return self.rcon.command(f"kick {nick} {reason}") is not None
 
     def whitelist_remove(self, nick):
         """Returns (removed_name or None, reloaded)."""
