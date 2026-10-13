@@ -61,7 +61,7 @@ class Allay:
             "week": ("Промежуточные итоги недели", self.cmd_week, False),
             "wl_add": ("Добавить игрока: ник [@telegram]", self.cmd_wl_add, True),
             "wl_remove": ("Удалить игрока из whitelist", self.cmd_wl_remove, True),
-            "reset_password": ("Сбросить пароль игрока: ник", self.cmd_reset_password, True),
+            "reset_password": ("Сбросить пароль игрока", self.cmd_reset_password, True),
         }
 
     # --- helpers ---
@@ -566,10 +566,23 @@ class Allay:
         return "\n".join(lines)
 
     def cmd_wl_remove(self, args, msg):
+        if not args:
+            return self.wl_remove_view(None)
         if len(args) != 1 or not NICK_RE.match(args[0]):
-            return "Использование: <code>/wl_remove ник</code>"
-        nick = args[0]
+            return "Использование: <code>/wl_remove [ник]</code>"
+        return self.remove_player(args[0])
 
+    def wl_remove_view(self, nick):
+        if nick is None:
+            return self.player_picker("wlrm", f"{e('leave')} Кого удалить из whitelist?")
+        nick = self.whitelisted(nick)
+        if nick is None:
+            return "Такого игрока нет в whitelist", None
+        return self.confirm("wlrm", nick, "🚪 Удалить",
+                            f"{e('leave')} Удалить <b>{html.escape(nick)}</b> из whitelist?\n"
+                            f"Он больше не сможет зайти на сервер")
+
+    def remove_player(self, nick):
         removed, reloaded = self.server.whitelist_remove(nick)
         players = self.load_players()
         kept = {k: v for k, v in players.items() if k.lower() != nick.lower()}
@@ -585,13 +598,40 @@ class Allay:
         return text
 
     def cmd_reset_password(self, args, msg):
+        if not args:
+            return self.reset_password_view(None)
         if len(args) != 1 or not NICK_RE.match(args[0]):
-            return "Использование: <code>/reset_password ник</code>"
-        # any whitelisted player, hidden ones included: it's an admin command
-        nick = next((x["name"] for x in self.server.whitelist()
-                     if x.get("name", "").lower() == args[0].lower()), None)
+            return "Использование: <code>/reset_password [ник]</code>"
+        return self.reset_password(args[0])
+
+    def whitelisted(self, query):
+        """Whitelisted nick, case-insensitive, hidden ones included (for admin commands)."""
+        return next((x["name"] for x in self.server.whitelist()
+                     if x.get("name", "").lower() == query.lower()), None)
+
+    def player_picker(self, kind, title):
+        """A button per whitelisted player (hidden ones included): admin commands without a nick."""
+        nicks = [x["name"] for x in self.server.whitelist() if x.get("name")]
+        return title, keyboard([button(n, f"{kind}:{n}") for n in nicks])
+
+    def confirm(self, kind, nick, action, question):
+        """Irreversible admin actions ask first; "<kind>_do:<nick>" performs, "<kind>:" goes back."""
+        return question, keyboard([button(action, f"{kind}_do:{nick}"), button("⬅️ Назад", f"{kind}:")], per_row=2)
+
+    def reset_password_view(self, nick):
         if nick is None:
-            return f"Игрока <b>{html.escape(args[0])}</b> нет в whitelist"
+            return self.player_picker("pwd", f"{e('lock')} Чей пароль сбросить?")
+        nick = self.whitelisted(nick)
+        if nick is None:
+            return "Такого игрока нет в whitelist", None
+        return self.confirm("pwd", nick, "✅ Сбросить",
+                            f"{e('lock')} Сбросить пароль <b>{html.escape(nick)}</b>?\n"
+                            f"При следующем входе он зарегистрируется заново")
+
+    def reset_password(self, query):
+        nick = self.whitelisted(query or "")
+        if nick is None:
+            return f"Игрока <b>{html.escape(query or '')}</b> нет в whitelist"
         name = f"<b>{html.escape(nick)}</b>"
 
         ok, out = self.server.auth_reset(nick)
@@ -646,25 +686,36 @@ class Allay:
 
     def handle_callback(self, query):
         """Inline button press: re-renders the message it belongs to."""
-        # stops the button spinner; useless to retry, the query expires in seconds
-        self.tg.call("answerCallbackQuery", retry=False, callback_query_id=query["id"])
         msg = query.get("message")
-        if not msg:
+        kind, _, arg = query.get("data", "").partition(":")
+        # kind -> (view(arg) -> text or (text, keyboard), admin only)
+        views = {
+            "top": (self.top_view, False),
+            "stats": (self.stats_view, False),
+            "pwd": (self.reset_password_view, True),
+            "pwd_do": (self.reset_password, True),
+            "wlrm": (self.wl_remove_view, True),
+            "wlrm_do": (self.remove_player, True),
+        }
+        view, admin_only = views.get(kind, (None, False))
+        is_admin = self.is_admin(query["from"]["id"])
+        denied = admin_only and not is_admin
+        # stops the button spinner (a popup for strangers); useless to retry, the query expires in seconds
+        self.tg.call("answerCallbackQuery", retry=False, callback_query_id=query["id"],
+                     **({"text": "Только для админа", "show_alert": True} if denied else {}))
+        if not msg or view is None or denied:
+            if denied:
+                log.info(f"button {query.get('data')} rejected: user id {query['from']['id']} is not admin")
             return
         chat = msg["chat"]
-        if chat["id"] != self.cfg.chat_id and not (chat["type"] == "private"
-                                                   and self.is_admin(query["from"]["id"])):
-            return
-
-        kind, _, arg = query.get("data", "").partition(":")
-        view = {"top": self.top_view, "stats": self.stats_view}.get(kind)
-        if view is None:
+        if chat["id"] != self.cfg.chat_id and not (chat["type"] == "private" and is_admin):
             return
         try:
-            text, markup = view(arg or None)
+            reply = view(arg or None)
         except Exception:
             log.exception(f"button {query.get('data')} failed")
             return
+        text, markup = reply if isinstance(reply, tuple) else (reply, None)
         self.tg.edit(chat["id"], msg["message_id"], text, keyboard=markup)
 
     def _set_commands(self):
